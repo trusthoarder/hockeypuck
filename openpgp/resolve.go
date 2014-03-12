@@ -52,7 +52,7 @@ func Resolve(pubkey *Pubkey) {
 			p.ScopedDigest = p.calcScopedDigest(r.Pubkey)
 			if _, has := scopedPackets[p.ScopedDigest]; has {
 				r.Pubkey.userIds = removeUserId(r.Pubkey.userIds, p)
-				r.Pubkey.Unsupported = append(r.Pubkey.Unsupported, p.Packet...)
+				r.Pubkey.Unsupported = append(r.Pubkey.Unsupported, p.Packet.Bytes...)
 				r.Pubkey.Unsupported = append(r.Pubkey.Unsupported, concatSigPackets(p.signatures)...)
 				p.signatures = nil
 			} else {
@@ -66,7 +66,7 @@ func Resolve(pubkey *Pubkey) {
 			p.ScopedDigest = p.calcScopedDigest(r.Pubkey)
 			if _, has := scopedPackets[p.ScopedDigest]; has {
 				r.Pubkey.userAttributes = removeUserAttribute(r.Pubkey.userAttributes, p)
-				r.Pubkey.Unsupported = append(r.Pubkey.Unsupported, p.Packet...)
+				r.Pubkey.Unsupported = append(r.Pubkey.Unsupported, p.Packet.Bytes...)
 				r.Pubkey.Unsupported = append(r.Pubkey.Unsupported, concatSigPackets(p.signatures)...)
 				p.signatures = nil
 			} else {
@@ -83,7 +83,7 @@ func Resolve(pubkey *Pubkey) {
 		case *Signature:
 			if _, has := scopedPackets[p.ScopedDigest]; has {
 				signable.RemoveSignature(p)
-				r.Pubkey.Unsupported = append(r.Pubkey.Unsupported, p.Packet...)
+				r.Pubkey.Unsupported = append(r.Pubkey.Unsupported, p.Packet.Bytes...)
 			} else {
 				scopedPackets[p.ScopedDigest] = true
 			}
@@ -147,7 +147,7 @@ func removeSignature(sigs []*Signature, removeSig *Signature) (result []*Signatu
 
 func concatSigPackets(sigs []*Signature) (result []byte) {
 	for _, sig := range sigs {
-		result = append(result, sig.Packet...)
+		result = append(result, sig.Packet.Bytes...)
 	}
 	return
 }

@@ -27,15 +27,16 @@ import (
 
 	"code.google.com/p/go.crypto/openpgp/packet"
 
+	"github.com/cmars/hockeypuck/types"
 	"github.com/cmars/hockeypuck/util"
 )
 
 type Subkey struct {
 	RFingerprint string         `db:"uuid"`        // immutable
-	Creation     time.Time      `db:"creation"`    // immutable
-	Expiration   time.Time      `db:"expiration"`  // mutable
+	Creation     types.WrappedTime `db:"creation"`    // immutable
+	Expiration   types.WrappedTime `db:"expiration"`  // mutable
 	State        int            `db:"state"`       // mutable
-	Packet       []byte         `db:"packet"`      // immutable
+	Packet       types.WrappedByteArray `db:"packet"`      // immutable
 	PubkeyRFP    string         `db:"pubkey_uuid"` // immutable
 	RevSigDigest sql.NullString `db:"revsig_uuid"` // mutable
 	Algorithm    int            `db:"algorithm"`   // immutable
@@ -61,7 +62,11 @@ func (subkey *Subkey) Fingerprint() string {
 }
 
 func (subkey *Subkey) KeyId() string {
-	return util.Reverse(subkey.RFingerprint[:16])
+	return util.Reverse(subkey.RKeyId())
+}
+
+func (subkey *Subkey) RKeyId() string {
+	return subkey.RFingerprint[:16]
 }
 
 func (subkey *Subkey) ShortId() string {
@@ -71,14 +76,14 @@ func (subkey *Subkey) ShortId() string {
 func (subkey *Subkey) Signatures() []*Signature { return subkey.signatures }
 
 func (subkey *Subkey) Serialize(w io.Writer) error {
-	_, err := w.Write(subkey.Packet)
+	_, err := w.Write(subkey.Packet.Bytes)
 	return err
 }
 
 func (subkey *Subkey) Uuid() string { return subkey.RFingerprint }
 
 func (subkey *Subkey) GetOpaquePacket() (*packet.OpaquePacket, error) {
-	return toOpaquePacket(subkey.Packet)
+	return toOpaquePacket(subkey.Packet.Bytes)
 }
 
 func (subkey *Subkey) GetPacket() (p packet.Packet, err error) {
@@ -111,7 +116,7 @@ func (subkey *Subkey) setPacket(p packet.Packet) (err error) {
 }
 
 func (subkey *Subkey) Read() (err error) {
-	buf := bytes.NewBuffer(subkey.Packet)
+	buf := bytes.NewBuffer(subkey.Packet.Bytes)
 	var p packet.Packet
 	if p, err = packet.Read(buf); err != nil {
 		return err
@@ -124,7 +129,7 @@ func NewSubkey(op *packet.OpaquePacket) (subkey *Subkey, err error) {
 	if err = op.Serialize(&buf); err != nil {
 		return
 	}
-	subkey = &Subkey{Packet: buf.Bytes()}
+	subkey = &Subkey{Packet: types.WrappedByteArray{Bytes: buf.Bytes()}}
 	var p packet.Packet
 	if p, err = op.Parse(); err != nil {
 		return
@@ -153,8 +158,8 @@ func (subkey *Subkey) initV4() error {
 		return ErrInvalidPacketType
 	}
 	subkey.RFingerprint = util.Reverse(fingerprint)
-	subkey.Creation = subkey.PublicKey.CreationTime
-	subkey.Expiration = NeverExpires
+	subkey.Creation.Time = subkey.PublicKey.CreationTime
+	subkey.Expiration.Time = NeverExpires
 	subkey.Algorithm = int(subkey.PublicKey.PubKeyAlgo)
 	subkey.BitLen = int(bitLen)
 	return nil
@@ -171,10 +176,10 @@ func (subkey *Subkey) initV3() error {
 		return ErrInvalidPacketType
 	}
 	subkey.RFingerprint = util.Reverse(fingerprint)
-	subkey.Creation = subkey.PublicKeyV3.CreationTime
-	subkey.Expiration = NeverExpires
+	subkey.Creation.Time = subkey.PublicKeyV3.CreationTime
+	subkey.Expiration.Time = NeverExpires
 	if subkey.PublicKeyV3.DaysToExpire > 0 {
-		subkey.Expiration = subkey.Creation.Add(time.Duration(subkey.PublicKeyV3.DaysToExpire) * time.Hour * 24)
+		subkey.Expiration.Time = subkey.Creation.Add(time.Duration(subkey.PublicKeyV3.DaysToExpire) * time.Hour * 24)
 	}
 	subkey.Algorithm = int(subkey.PublicKeyV3.PubKeyAlgo)
 	subkey.BitLen = int(bitLen)
@@ -219,7 +224,7 @@ func (subkey *Subkey) linkSelfSigs(pubkey *Pubkey) {
 		} else if sig.SigType == 0x18 && time.Now().Unix() < sig.Expiration.Unix() { // TODO: add packet.SigTypeSubkeyBinding
 			if err := pubkey.verifyPublicKeySelfSig(subkey, sig); err == nil {
 				if sig.Expiration.Unix() == NeverExpires.Unix() && sig.Signature != nil && sig.Signature.KeyLifetimeSecs != nil {
-					sig.Expiration = subkey.Creation.Add(
+					sig.Expiration.Time = subkey.Creation.Add(
 						time.Duration(*sig.Signature.KeyLifetimeSecs) * time.Second)
 				}
 				if subkey.bindingSig == nil || sig.Creation.Unix() < subkey.bindingSig.Creation.Unix() {

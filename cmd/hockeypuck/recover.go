@@ -21,9 +21,9 @@ package main
 import (
 	"log"
 
-	"launchpad.net/gnuflag"
 	. "github.com/cmars/hockeypuck"
 	"github.com/cmars/hockeypuck/openpgp"
+	"launchpad.net/gnuflag"
 
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/storage"
