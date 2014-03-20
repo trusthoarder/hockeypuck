@@ -3,3 +3,54 @@ Hockeypuck: OpenPGP Key Server
 
 Documentation: http://hockeypuck.github.io
 
+Installation
+------------
+
+This has some Go-related dependencies:
+
+* Go
+* Bazaar (bzr)
+* Mercurial (hg)
+* Git
+
+Install those (use the provided Vagrant setup if you're into that), then
+to get this running:
+
+1. Grab the original, then replace it with ours:
+
+    go get github.com/cmars/hockeypuck
+    rm -rf src/github.com/cmars/hockeypuck
+    ln -s $PWD/hockeypuck src/github.com/cmars/hockeypuck
+
+2. Install the dependencies:
+
+    go get code.google.com/p/go.crypto/md4 code.google.com/p/go.crypto/openpgp code.google.com/p/go.crypto/openpgp/armor code.google.com/p/go.crypto/openpgp/errors code.google.com/p/go.crypto/openpgp/packet code.google.com/p/go.crypto/ripemd160 github.com/cmars/conflux github.com/cmars/conflux/recon github.com/cmars/conflux/recon/leveldb github.com/jmoiron/sqlx github.com/juju/errgo/errors github.com/lib/pq github.com/syndtr/goleveldb/leveldb github.com/syndtr/goleveldb/leveldb/storage launchpad.net/gnuflag
+
+3. Build the app:
+
+    cd hockeypuck
+    go build github.com/cmars/hockeypuck/cmd/hockeypuck
+    cd ..
+
+4. Make the database
+
+    createdb hkp
+
+5. Make a configuration file for your database:
+
+    cat > hockeypuck.conf
+    [hockeypuck.openpgp.db]
+    dsn="dbname=hkp host=localhost sslmode=disable user=mike"
+    ^D
+
+Running
+-------
+
+Now that you have it built, you can run it:
+
+    ./hockeypuck/hockeypuck run --config hockeypuck.conf
+
+To stop it you must use `kill`:
+
+    ^Z
+    kill -9 %1
