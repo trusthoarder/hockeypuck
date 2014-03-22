@@ -81,7 +81,11 @@ func (r *SksPeer) Start() {
 	go func() {
 		select {
 		case _ = <-sigChan:
-			r.Peer.Stop()
+      // This should be r.Peer.Stop(), but that deadlocks on serverStop
+      // and gossipStop. The implementation in question is on GitHub:
+      // http://bit.ly/1mngFdy
+      r.Peer.Disable()
+      os.Exit(0)
 		}
 	}()
 
