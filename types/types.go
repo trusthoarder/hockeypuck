@@ -26,7 +26,7 @@ func (wt *WrappedTime) Scan(value interface{}) error {
         }
         return err
     case int:
-        wt.Time = time.Unix(int64(value.(int)), 0)
+        wt.Time = time.Unix(0, int64(value.(int) * 1000000))
         return nil
     default:
         return errors.New("Unsupported type")

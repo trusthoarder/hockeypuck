@@ -258,16 +258,28 @@ func (w *Worker) UpdateKey(pubkey *Pubkey) (err error) {
 		switch r := rec.(type) {
 		case *Pubkey:
 			_, err := w.db.Execv(`
-UPDATE openpgp_pubkey SET
-	creation = $2, expiration = $3, state = $4, packet = $5,
-	ctime = $6, mtime = $7, md5 = $5, sha256 = $6,
-	revsig_uuid = $7, primary_uid = $8, primary_uat = $9,
-	algorithm = $10, bit_len = $11, unsupp = $12
-WHERE uuid = $1`, r.RFingerprint,
+				MATCH (key:PubKey { uuid:{0} })
+				SET key = {
+					uuid:{0},
+					creation:{1},
+					expiration:{2},
+					state:{3},
+					packet:{4},
+					ctime:{5},
+					mtime:{6},
+					md5:{7},
+					sha256:{8},
+					algorithm:{9},
+					bit_len:{10},
+					unsupp:{11},
+					r_keyid:{12}
+				}`, r.RFingerprint,
 				r.Creation, r.Expiration, r.State, r.Packet,
 				r.Ctime, r.Mtime, r.Md5, r.Sha256,
-				r.RevSigDigest, r.PrimaryUid, r.PrimaryUat,
-				r.Algorithm, r.BitLen, r.Unsupported)
+				r.Algorithm, r.BitLen, r.Unsupported, r.RKeyId())
+				// When sending a key with the primary UID changed ...
+				//FIXME: This doesn't update the PRIMARILY_IDENTIFIED_BY relationships
+				//FIXME: There's a unique constraint violation sometime after this
 			if err != nil {
 				return errors.Mask(err)
 			}
