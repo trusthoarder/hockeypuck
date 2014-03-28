@@ -279,20 +279,22 @@ func (w *Worker) UpdateKey(pubkey *Pubkey) (err error) {
 				r.Algorithm, r.BitLen, r.Unsupported, r.RKeyId())
 				// When sending a key with the primary UID changed ...
 				//FIXME: This doesn't update the PRIMARILY_IDENTIFIED_BY relationships
-				//FIXME: There's a unique constraint violation sometime after this
 			if err != nil {
 				return errors.Mask(err)
 			}
 			signable = r
 		case *Subkey:
 			_, err := w.tx.Execv(`
-UPDATE openpgp_subkey SET
-	creation = $2, expiration = $3, state = $4, packet = $5,
-	pubkey_uuid = $6, revsig_uuid = $7, algorithm = $8, bit_len = $9
-WHERE uuid = $1`,
-				r.RFingerprint,
-				r.Creation, r.Expiration, r.State, r.Packet,
-				r.PubkeyRFP, r.RevSigDigest, r.Algorithm, r.BitLen)
+					MATCH (key:SubKey { uuid:{0} })
+					SET key.creation = {1}
+					SET key.expiration = {2}
+					SET key.state = {3}
+					SET key.packet = {4}
+					SET key.algorithm = {5}
+					SET key.bit_len = {6}`,
+				r.RFingerprint, r.Creation, r.Expiration, r.State, r.Packet,
+				r.Algorithm, r.BitLen)
+				//FIXME: r.PubkeyRFP and r.RevSigDigest
 			if err != nil {
 				return errors.Mask(err)
 			}
