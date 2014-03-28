@@ -33,6 +33,7 @@ import (
 	"code.google.com/p/go.crypto/openpgp/errors"
 	"code.google.com/p/go.crypto/openpgp/packet"
 
+	"github.com/cmars/hockeypuck/types"
 	"github.com/cmars/hockeypuck/util"
 )
 
@@ -49,12 +50,12 @@ type Pubkey struct {
 	/* Database fields */
 
 	RFingerprint string         `db:"uuid"`        // immutable
-	Creation     time.Time      `db:"creation"`    // immutable
-	Expiration   time.Time      `db:"expiration"`  // mutable
+	Creation     types.WrappedTime    `db:"creation"`    // immutable
+	Expiration   types.WrappedTime    `db:"expiration"`  // mutable
 	State        int            `db:"state"`       // mutable
-	Packet       []byte         `db:"packet"`      // immutable
-	Ctime        time.Time      `db:"ctime"`       // immutable
-	Mtime        time.Time      `db:"mtime"`       // mutable
+	Packet       types.WrappedByteArray `db:"packet"`      // immutable
+	Ctime        types.WrappedTime    `db:"ctime"`       // immutable
+	Mtime        types.WrappedTime    `db:"mtime"`       // mutable
 	Md5          string         `db:"md5"`         // mutable
 	Sha256       string         `db:"sha256"`      // mutable
 	RevSigDigest sql.NullString `db:"revsig_uuid"` // mutable
@@ -96,6 +97,13 @@ func (pubkey *Pubkey) KeyId() string {
 	return util.Reverse(pubkey.RFingerprint[:16])
 }
 
+func (pubkey *Pubkey) RKeyId() string {
+	if pubkey.PublicKeyV3 != nil {
+		return util.Reverse(fmt.Sprintf("%016x", pubkey.PublicKeyV3.KeyId))
+	}
+	return pubkey.RFingerprint[:16]
+}
+
 func (pubkey *Pubkey) ShortId() string {
 	if pubkey.PublicKeyV3 != nil {
 		return fmt.Sprintf("%08x", uint32(pubkey.PublicKeyV3.KeyId))
@@ -108,14 +116,14 @@ func (pubkey *Pubkey) UserIds() []*UserId { return pubkey.userIds }
 func (pubkey *Pubkey) Subkeys() []*Subkey { return pubkey.subkeys }
 
 func (pubkey *Pubkey) Serialize(w io.Writer) error {
-	_, err := w.Write(pubkey.Packet)
+	_, err := w.Write(pubkey.Packet.Bytes)
 	return err
 }
 
 func (pubkey *Pubkey) Uuid() string { return pubkey.RFingerprint }
 
 func (pubkey *Pubkey) GetOpaquePacket() (*packet.OpaquePacket, error) {
-	return toOpaquePacket(pubkey.Packet)
+	return toOpaquePacket(pubkey.Packet.Bytes)
 }
 
 func (pubkey *Pubkey) GetPacket() (p packet.Packet, err error) {
@@ -148,7 +156,7 @@ func (pubkey *Pubkey) setPacket(p packet.Packet) (err error) {
 }
 
 func (pubkey *Pubkey) Read() (err error) {
-	buf := bytes.NewBuffer(pubkey.Packet)
+	buf := bytes.NewBuffer(pubkey.Packet.Bytes)
 	var p packet.Packet
 	if p, err = packet.Read(buf); err != nil {
 		if pubkey.State&PacketStateUnsuppPubkey != 0 {
@@ -173,7 +181,7 @@ func NewPubkey(op *packet.OpaquePacket) (pubkey *Pubkey, err error) {
 	if err = op.Serialize(&buf); err != nil {
 		return
 	}
-	pubkey = &Pubkey{Packet: buf.Bytes()}
+	pubkey = &Pubkey{Packet: types.WrappedByteArray{Bytes: buf.Bytes()} }
 	var p packet.Packet
 	if p, err = op.Parse(); err != nil {
 		return pubkey, pubkey.initUnsupported(op)
@@ -223,8 +231,8 @@ func (pubkey *Pubkey) initV4() error {
 		return ErrInvalidPacketType
 	}
 	pubkey.RFingerprint = util.Reverse(fingerprint)
-	pubkey.Creation = pubkey.PublicKey.CreationTime
-	pubkey.Expiration = NeverExpires
+	pubkey.Creation.Time = pubkey.PublicKey.CreationTime
+	pubkey.Expiration.Time = NeverExpires
 	pubkey.Algorithm = int(pubkey.PublicKey.PubKeyAlgo)
 	pubkey.BitLen = int(bitLen)
 	return nil
@@ -246,10 +254,10 @@ func (pubkey *Pubkey) initV3() error {
 		return ErrInvalidPacketType
 	}
 	pubkey.RFingerprint = util.Reverse(fingerprint)
-	pubkey.Creation = pubkey.PublicKeyV3.CreationTime
-	pubkey.Expiration = NeverExpires
+	pubkey.Creation.Time = pubkey.PublicKeyV3.CreationTime
+	pubkey.Expiration.Time = NeverExpires
 	if pubkey.PublicKeyV3.DaysToExpire > 0 {
-		pubkey.Expiration = pubkey.Creation.Add(time.Duration(pubkey.PublicKeyV3.DaysToExpire) * time.Hour * 24)
+		pubkey.Expiration.Time = pubkey.Creation.Time.Add(time.Duration(pubkey.PublicKeyV3.DaysToExpire) * time.Hour * 24)
 	}
 	pubkey.Algorithm = int(pubkey.PublicKeyV3.PubKeyAlgo)
 	pubkey.BitLen = int(bitLen)

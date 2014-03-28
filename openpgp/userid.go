@@ -27,15 +27,16 @@ import (
 
 	"code.google.com/p/go.crypto/openpgp/packet"
 
+	"github.com/cmars/hockeypuck/types"
 	"github.com/cmars/hockeypuck/util"
 )
 
 type UserId struct {
 	ScopedDigest string         `db:"uuid"`        // immutable
-	Creation     time.Time      `db:"creation"`    // mutable (derived from latest sigs)
-	Expiration   time.Time      `db:"expiration"`  // mutable
+	Creation     types.WrappedTime `db:"creation"`    // mutable (derived from latest sigs)
+	Expiration   types.WrappedTime `db:"expiration"`  // mutable
 	State        int            `db:"state"`       // mutable
-	Packet       []byte         `db:"packet"`      // immutable
+	Packet       types.WrappedByteArray `db:"packet"`      // immutable
 	PubkeyRFP    string         `db:"pubkey_uuid"` // immutable
 	RevSigDigest sql.NullString `db:"revsig_uuid"` // mutable
 	Keywords     string         `db:"keywords"`    // immutable
@@ -57,19 +58,19 @@ func (uid *UserId) calcScopedDigest(pubkey *Pubkey) string {
 	h := sha256.New()
 	h.Write([]byte(pubkey.RFingerprint))
 	h.Write([]byte("{uid}"))
-	h.Write(uid.Packet)
+	h.Write(uid.Packet.Bytes)
 	return toAscii85String(h.Sum(nil))
 }
 
 func (uid *UserId) Serialize(w io.Writer) error {
-	_, err := w.Write(uid.Packet)
+	_, err := w.Write(uid.Packet.Bytes)
 	return err
 }
 
 func (uid *UserId) Uuid() string { return uid.ScopedDigest }
 
 func (uid *UserId) GetOpaquePacket() (*packet.OpaquePacket, error) {
-	return toOpaquePacket(uid.Packet)
+	return toOpaquePacket(uid.Packet.Bytes)
 }
 
 func (uid *UserId) GetPacket() (packet.Packet, error) {
@@ -89,7 +90,7 @@ func (uid *UserId) setPacket(p packet.Packet) error {
 }
 
 func (uid *UserId) Read() (err error) {
-	buf := bytes.NewBuffer(uid.Packet)
+	buf := bytes.NewBuffer(uid.Packet.Bytes)
 	var p packet.Packet
 	if p, err = packet.Read(buf); err != nil {
 		return
@@ -102,7 +103,7 @@ func NewUserId(op *packet.OpaquePacket) (uid *UserId, err error) {
 	if err = op.Serialize(&buf); err != nil {
 		return
 	}
-	uid = &UserId{Packet: buf.Bytes()}
+	uid = &UserId{Packet: types.WrappedByteArray{Bytes: buf.Bytes()}}
 	var p packet.Packet
 	if p, err = op.Parse(); err != nil {
 		return
@@ -114,8 +115,8 @@ func NewUserId(op *packet.OpaquePacket) (uid *UserId, err error) {
 }
 
 func (uid *UserId) init() (err error) {
-	uid.Creation = NeverExpires
-	uid.Expiration = time.Unix(0, 0)
+	uid.Creation.Time = NeverExpires
+	uid.Expiration.Time = time.Unix(0, 0)
 	uid.Keywords = util.CleanUtf8(uid.UserId.Id)
 	return
 }
@@ -170,7 +171,7 @@ func (uid *UserId) linkSelfSigs(pubkey *Pubkey) {
 		if sig.SigType >= 0x10 && sig.SigType <= 0x13 {
 			if err := pubkey.verifyUserIdSelfSig(uid, sig); err == nil {
 				if sig.Expiration.Unix() == NeverExpires.Unix() && sig.Signature != nil && sig.Signature.KeyLifetimeSecs != nil {
-					sig.Expiration = pubkey.Creation.Add(
+					sig.Expiration.Time = pubkey.Creation.Time.Add(
 						time.Duration(*sig.Signature.KeyLifetimeSecs) * time.Second)
 				}
 				if uid.selfSignature == nil || sig.Creation.Unix() > uid.selfSignature.Creation.Unix() {

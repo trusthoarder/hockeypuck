@@ -86,121 +86,97 @@ func (l *Loader) InsertKey(pubkey *Pubkey) (err error) {
 	return err
 }
 
-// insertSelectFrom completes an INSERT INTO .. SELECT FROM
-// SQL statement based on the loader's bulk loading mode.
-func (l *Loader) insertSelectFrom(sql, table, where string) string {
-	if !l.bulk {
-		sql = fmt.Sprintf("%s WHERE NOT EXISTS (SELECT 1 FROM %s WHERE %s)",
-			sql, table, where)
-	}
-	return sql
-}
-
 func (l *Loader) insertPubkey(r *Pubkey) error {
-	_, err := l.tx.Execv(l.insertSelectFrom(`
-INSERT INTO openpgp_pubkey (
-	uuid, creation, expiration, state, packet,
-	ctime, mtime,
-    md5, sha256, revsig_uuid, primary_uid, primary_uat,
-	algorithm, bit_len, unsupp)
-SELECT $1, $2, $3, $4, $5,
-	now(), now(),
-    $6, $7, $8, $9, $10,
-	$11, $12, $13`,
-		"openpgp_pubkey", "uuid = $1"),
-		r.RFingerprint, r.Creation, r.Expiration, r.State, r.Packet,
-		// TODO: use mtime and ctime from record, or use RETURNING to set it
-		r.Md5, r.Sha256, r.RevSigDigest, r.PrimaryUid, r.PrimaryUat,
-		r.Algorithm, r.BitLen, r.Unsupported)
-	return err
+  // The revocation is stored as a :SIGNS with sigType=32.
+
+	_, err := l.tx.Execv(`
+      MERGE (key:PubKey { r_keyid:{10} })
+      SET key = { uuid:{0}, creation:{1}, expiration:{2}, state:{3}, 
+              packet:{4}, ctime:TIMESTAMP(), mtime:TIMESTAMP(), 
+              md5:{5}, sha256:{6}, algorithm:{7}, bit_len:{8}, unsupp:{9},
+              r_keyid:{10} }
+              `,
+    r.RFingerprint, r.Creation, r.Expiration, r.State, r.Packet, r.Md5,
+    r.Sha256, r.Algorithm, r.BitLen, r.Unsupported, r.RKeyId())
+
+  return err
 }
 
 func (l *Loader) insertSubkey(pubkey *Pubkey, r *Subkey) error {
-	_, err := l.tx.Execv(l.insertSelectFrom(`
-INSERT INTO openpgp_subkey (
-	uuid, creation, expiration, state, packet,
-	pubkey_uuid, revsig_uuid, algorithm, bit_len)
-SELECT $1, $2, $3, $4, $5,
-	$6, $7, $8, $9`,
-		"openpgp_subkey", "uuid = $1"),
+    _, err := l.tx.Execv(`
+            MERGE (subkey:SubKey { uuid:{0} })
+            SET subkey = { uuid:{0}, creation:{1}, expiration:{2}, state:{3}, 
+            packet:{4}, algorithm:{5}, bit_len:{6}, r_keyid:{7} }
+            WITH subkey
+            MATCH (pubkey:PubKey { uuid:{8} })
+            MERGE (subkey)-[:BELONGS_TO]->(pubkey)`,
 		r.RFingerprint, r.Creation, r.Expiration, r.State, r.Packet,
-		pubkey.RFingerprint, r.RevSigDigest, r.Algorithm, r.BitLen)
+    r.Algorithm, r.BitLen, r.RKeyId(), pubkey.RFingerprint)
 	return err
 }
 
 func (l *Loader) insertUid(pubkey *Pubkey, r *UserId) error {
-	_, err := l.tx.Execv(l.insertSelectFrom(`
-INSERT INTO openpgp_uid (
-	uuid, creation, expiration, state, packet,
-	pubkey_uuid, revsig_uuid, keywords, keywords_fulltext)
-SELECT $1, $2, $3, $4, $5,
-	$6, $7, $8, to_tsvector($8)`,
-		"openpgp_uid", "uuid = $1"),
+	_, err := l.tx.Execv(
+        `MERGE (uid:UID { uuid:{0} })
+        SET uid = { uuid:{0}, creation:{1}, expiration:{2}, state:{3},
+                    packet:{4}, keywords:{5}, keywords_fulltext:{5} }
+        WITH uid
+        MATCH (key:PubKey { uuid:{6} })
+        MERGE (uid)-[:IDENTIFIES]->(key)`,
 		r.ScopedDigest, r.Creation, r.Expiration, r.State, r.Packet,
-		pubkey.RFingerprint, r.RevSigDigest, util.CleanUtf8(r.Keywords))
+		util.CleanUtf8(r.Keywords), pubkey.RFingerprint)
 	return err
 }
 
 func (l *Loader) insertUat(pubkey *Pubkey, r *UserAttribute) error {
-	_, err := l.tx.Execv(l.insertSelectFrom(`
-INSERT INTO openpgp_uat (
-	uuid, creation, expiration, state, packet,
-	pubkey_uuid, revsig_uuid)
-SELECT $1, $2, $3, $4, $5,
-	$6, $7`,
-		"openpgp_uat", "uuid = $1"),
-		r.ScopedDigest, r.Creation, r.Expiration, r.State, r.Packet,
-		pubkey.RFingerprint, r.RevSigDigest)
+    _, err := l.tx.Execv(`
+        MERGE (uat:UAT { uuid:{0} })
+        SET uat = { uuid:{0}, creation:{1}, expiration:{2}, state:{3},
+                    packet:{4} }
+        WITH uat
+        MATCH (key:PubKey { uuid:{5} })
+        MERGE (uat)-[:IDENTIFIES]->(key)`,
+    r.ScopedDigest, r.Creation, r.Expiration, r.State, r.Packet,
+    pubkey.RFingerprint)
 	return err
 }
 
 func (l *Loader) insertSig(pubkey *Pubkey, signable PacketRecord, r *Signature) error {
-	baseSql := `
-INSERT INTO openpgp_sig (
-	uuid, creation, expiration, state, packet,
-	sig_type, signer, signer_uuid%s)
-SELECT $1, $2, $3, $4, $5, $6, $7, $8%s`
-	matchSql := "uuid = $1"
-	args := []interface{}{
-		r.ScopedDigest, r.Creation, r.Expiration, r.State, r.Packet,
-		r.SigType, r.RIssuerKeyId, r.RIssuerFingerprint,
-	}
-	var sql string
+	var cypher string
+    var signedType string
+    var signedIdentifier string
+
 	switch signed := signable.(type) {
 	case *Pubkey:
-		sql = fmt.Sprintf(baseSql,
-			", pubkey_uuid",
-			", $9")
-		args = append(args, signed.RFingerprint)
-		matchSql += " AND pubkey_uuid = $9"
+        signedType = "PubKey"
+        signedIdentifier = signed.RFingerprint
 	case *Subkey:
-		sql = fmt.Sprintf(baseSql,
-			", pubkey_uuid, subkey_uuid",
-			", $9, $10")
-		args = append(args, pubkey.RFingerprint, signed.RFingerprint)
-		matchSql += " AND pubkey_uuid = $9 AND subkey_uuid = $10"
+        signedType = "SubKey"
+        signedIdentifier = signed.RFingerprint
 	case *UserId:
-		sql = fmt.Sprintf(baseSql,
-			", pubkey_uuid, uid_uuid",
-			", $9, $10")
-		args = append(args, pubkey.RFingerprint, signed.ScopedDigest)
-		matchSql += " AND pubkey_uuid = $9 AND uid_uuid = $10"
+        signedType = "UID"
+        signedIdentifier = signed.ScopedDigest
 	case *UserAttribute:
-		sql = fmt.Sprintf(baseSql,
-			", pubkey_uuid, uat_uuid",
-			", $9, $10")
-		args = append(args, pubkey.RFingerprint, signed.ScopedDigest)
-		matchSql += " AND pubkey_uuid = $9 AND uat_uuid = $10"
+        signedType = "UAT"
+        signedIdentifier = signed.ScopedDigest
 	case *Signature:
-		sql = fmt.Sprintf(baseSql,
-			", pubkey_uuid, sig_uuid",
-			", $9, $10")
-		args = append(args, pubkey.RFingerprint, signed.ScopedDigest)
-		matchSql += " AND pubkey_uuid = $9 AND sig_uuid = $10"
+        signedType = "Signature"
+        signedIdentifier = signed.ScopedDigest
 	default:
 		return fmt.Errorf("Unsupported packet record type: %v", signed)
 	}
-	_, err := l.tx.Execv(l.insertSelectFrom(sql, "openpgp_sig", matchSql), args...)
-	// TODO: use RETURNING to update matched issuer fingerprint
+
+    cypher = fmt.Sprintf(
+        `MATCH (signed:%s { uuid:{0} })
+         MERGE (signer:PubKey { r_keyid:{1} })
+         MERGE (signer)-[:SIGNS {
+             uuid:{2}, creation:{3}, expiration:{4}, state:{5}, packet:{6},
+             sig_type:{7}
+         }]->(signed)`,
+         signedType)
+
+	_, err := l.tx.Execv(cypher, signedIdentifier, r.RIssuerKeyId,
+            r.ScopedDigest, r.Creation, r.Expiration, r.State, r.Packet,
+            r.SigType)
 	return err
 }

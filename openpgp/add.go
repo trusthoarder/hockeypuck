@@ -227,15 +227,15 @@ func (w *Worker) UpsertKey(key *Pubkey) (change *KeyChange) {
 	}
 	switch change.Type {
 	case KeyModified:
-		lastKey.Mtime = time.Now()
+		lastKey.Mtime.Time = time.Now()
 		if change.Error = w.UpdateKey(lastKey); change.Error == nil {
 			w.UpdateKeyRelations(lastKey)
 		} else {
 			log.Println(change.Error)
 		}
 	case KeyAdded:
-		key.Ctime = time.Now()
-		key.Mtime = key.Ctime
+		key.Ctime.Time = time.Now()
+		key.Mtime.Time = key.Ctime.Time
 		if change.Error = w.InsertKey(key); change.Error == nil {
 			w.UpdateKeyRelations(key)
 		} else {
@@ -429,7 +429,11 @@ UPDATE openpgp_uat SET revsig_uuid = $1 WHERE uuid = $2`,
 func (w *Worker) updatePrimaryUid(pubkey *Pubkey, r *UserId) error {
 	if pubkey.PrimaryUid.String == r.ScopedDigest {
 		if _, err := w.tx.Execv(`
-UPDATE openpgp_pubkey SET primary_uid = $1 WHERE uuid = $2`,
+          MATCH (pubkey:PubKey { uuid:{1} }),
+                (uid:UID { uuid:{0} })
+          OPTIONAL MATCH (pubkey)-[rel:PRIMARILY_IDENTIFIED_BY]->(q:UID)
+          DELETE rel
+          CREATE (pubkey)-[:PRIMARILY_IDENTIFIED_BY]->(uid)`,
 			r.ScopedDigest, pubkey.RFingerprint); err != nil {
 			return errors.Mask(err)
 		}
@@ -440,7 +444,11 @@ UPDATE openpgp_pubkey SET primary_uid = $1 WHERE uuid = $2`,
 func (w *Worker) updatePrimaryUat(pubkey *Pubkey, r *UserAttribute) error {
 	if pubkey.PrimaryUat.String == r.ScopedDigest {
 		if _, err := w.tx.Execv(`
-UPDATE openpgp_pubkey SET primary_uat = $1 WHERE uuid = $2`,
+          MATCH (pubkey:PubKey { uuid:{1} }),
+                (uat:UAT { uuid:{0} })
+          OPTIONAL MATCH (pubkey)-[rel:PRIMARILY_IDENTIFIED_BY]->(q:UAT)
+          DELETE rel
+          CREATE (pubkey)-[:PRIMARILY_IDENTIFIED_BY]->(uat)`,
 			r.ScopedDigest, pubkey.RFingerprint); err != nil {
 			return errors.Mask(err)
 		}

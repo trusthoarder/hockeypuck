@@ -147,7 +147,7 @@ func (ps *PksSync) SendKeys(status *PksStatus) (err error) {
 			return
 		}
 		// Send successful, update the timestamp accordingly
-		status.LastSync = key.Mtime
+		status.LastSync = key.Mtime.Time
 		_, err = ps.db.Execv("UPDATE pks_status SET last_sync = $1 WHERE email_addr = $2",
 			status.LastSync, status.Addr)
 		if err != nil {

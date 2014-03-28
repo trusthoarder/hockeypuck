@@ -207,12 +207,7 @@ func (w *Worker) lookupKeyidUuids(keyId string) (uuids []string, err error) {
 		return nil, ErrInvalidKeyId
 	}
 	rKeyId := util.Reverse(keyId)
-	var compareOp string
 	switch len(raw) {
-	case 4:
-		compareOp = "LIKE $1 || '________________________________'"
-	case 8:
-		compareOp = "LIKE $1 || '________________________'"
 	case 16:
 		return []string{rKeyId}, nil
 	case 20:
@@ -220,10 +215,13 @@ func (w *Worker) lookupKeyidUuids(keyId string) (uuids []string, err error) {
 	default:
 		return nil, ErrInvalidKeyId
 	}
-	rows, err := w.db.Queryx(fmt.Sprintf(`
-SELECT uuid FROM openpgp_pubkey WHERE uuid %s
-UNION
-SELECT pubkey_uuid FROM openpgp_subkey WHERE uuid %s`, compareOp, compareOp), rKeyId)
+    rows, err := w.db.Queryx(`
+        MATCH (key:PubKey { r_keyid:{0} })
+        RETURN key
+        UNION ALL
+        MATCH (subkey:SubKey { r_keyid:{0})-[:BELONGS_TO]->(key)
+        RETURN key
+    `, rKeyId)
 	if err == sql.ErrNoRows {
 		return nil, ErrKeyNotFound
 	} else if err != nil {
@@ -288,7 +286,28 @@ func (w *Worker) fetchKeys(uuids []string) (results ReadKeyResults) {
 
 func (w *Worker) fetchKey(uuid string) (pubkey *Pubkey, err error) {
 	pubkey = new(Pubkey)
-	err = w.db.Get(pubkey, `SELECT * FROM openpgp_pubkey WHERE uuid = $1`, uuid)
+	err = w.db.Get(pubkey, `
+        MATCH (key:PubKey { uuid:{0} })
+        OPTIONAL MATCH (key)-[:REVOKED_BY]->(revsig)
+        OPTIONAL MATCH (key)-[:PRIMARILY_IDENTIFIED_BY]->(uid:UID)
+        OPTIONAL MATCH (key)-[:PRIMARILY_IDENTIFIED_BY]->(uat:UAT)
+        RETURN
+            key.uuid AS uuid,
+            key.creation AS creation,
+            key.expiration AS expiration,
+            key.state AS state,
+            key.packet AS packet,
+            key.ctime AS ctime,
+            key.mtime AS mtime,
+            key.md5 AS md5,
+            key.sha256 AS sha256,
+            revsig.uuid AS revsig_uuid,
+            uid.uuid AS primary_uid,
+            uat.uuid AS primary_uat,
+            key.algorithm AS algorithm,
+            key.bit_len AS bit_len,
+            key.unsupp AS unsupp
+    `, uuid)
 	if err == sql.ErrNoRows {
 		return nil, ErrKeyNotFound
 	} else if err != nil {
@@ -300,8 +319,17 @@ func (w *Worker) fetchKey(uuid string) (pubkey *Pubkey, err error) {
 	// Retrieve all signatures made directly on the primary public key
 	sigs := []Signature{}
 	err = w.db.Select(&sigs, `
-SELECT * FROM openpgp_sig WHERE pubkey_uuid = $1
-	AND subkey_uuid IS NULL AND uid_uuid IS NULL AND uat_uuid IS NULL AND sig_uuid IS NULL`,
+        MATCH (signer:PubKey)-[sig:SIGNS]->(signed:PubKey { uuid:{0} })
+        RETURN
+            sig.uuid AS uuid,
+            sig.creation AS creation,
+            sig.expiration AS expiration,
+            sig.state AS state,
+            sig.packet AS packet,
+            sig.sig_type AS sig_type,
+            signer.r_keyid AS signer,
+            signer.uuid AS signer_uuid,
+			signed.uuid AS pubkey_uuid`,
 		uuid)
 	if err != nil && err != sql.ErrNoRows {
 		return
@@ -315,8 +343,15 @@ SELECT * FROM openpgp_sig WHERE pubkey_uuid = $1
 	// Retrieve all uid records
 	uids := []UserId{}
 	err = w.db.Select(&uids, `
-SELECT uuid, creation, expiration, state, packet, pubkey_uuid, revsig_uuid, keywords
-FROM openpgp_uid WHERE pubkey_uuid = $1`, uuid)
+		MATCH (uid:UID)-[:IDENTIFIES]->(key:PubKey { uuid:{0} })
+		RETURN
+			uid.uuid AS uuid,
+			uid.creation AS creation,
+			uid.expiration AS expiration,
+			uid.state AS state,
+			uid.packet AS packet,
+			key.uuid AS pubkey_uuid,
+			uid.keywords AS keywords`, uuid)
 	if err != nil && err != sql.ErrNoRows {
 		return
 	}
@@ -327,8 +362,17 @@ FROM openpgp_uid WHERE pubkey_uuid = $1`, uuid)
 		}
 		sigs = []Signature{}
 		err = w.db.Select(&sigs, `
-SELECT * FROM openpgp_sig WHERE pubkey_uuid = $1 AND uid_uuid = $2
-	AND subkey_uuid IS NULL AND uat_uuid IS NULL AND sig_uuid IS NULL`, uuid, uid.ScopedDigest)
+			MATCH (signer:PubKey)-[sig:SIGNS]->(signed:UID { uuid:{0} })
+			RETURN
+				sig.uuid AS uuid,
+				sig.creation AS creation,
+				sig.expiration AS expiration,
+				sig.state AS state,
+				sig.packet AS packet,
+				sig.sig_type AS sig_type,
+				signer.r_keyid AS signer,
+				signer.uuid AS signer_uuid,
+				signed.uuid AS uid_uuid`, uid.ScopedDigest)
 		if err != nil && err != sql.ErrNoRows {
 			return
 		}
@@ -341,8 +385,15 @@ SELECT * FROM openpgp_sig WHERE pubkey_uuid = $1 AND uid_uuid = $2
 	}
 	// Retrieve all user attribute records
 	uats := []UserAttribute{}
-	err = w.db.Select(&uats,
-		`SELECT * FROM openpgp_uat WHERE pubkey_uuid = $1`, uuid)
+	err = w.db.Select(&uats, `
+		MATCH (uat:UAT)-[:IDENTIFIES]->(key:PubKey { uuid:{0} })
+		RETURN
+			uat.uuid AS uuid,
+			uat.creation AS creation,
+			uat.expiration AS expiration,
+			uat.state AS state,
+			uat.packet AS packet,
+			key.uuid AS pubkey_uuid`, uuid)
 	if err != nil && err != sql.ErrNoRows {
 		return
 	}
@@ -353,8 +404,17 @@ SELECT * FROM openpgp_sig WHERE pubkey_uuid = $1 AND uid_uuid = $2
 		}
 		sigs = []Signature{}
 		err = w.db.Select(&sigs, `
-SELECT * FROM openpgp_sig WHERE pubkey_uuid = $1 AND uat_uuid = $2
-	AND subkey_uuid IS NULL AND uid_uuid IS NULL AND sig_uuid IS NULL`, uuid, uat.ScopedDigest)
+			MATCH (signer:PubKey)-[sig:SIGNS]->(signed:UAT { uuid:{0} })
+			RETURN
+				sig.uuid AS uuid,
+				sig.creation AS creation,
+				sig.expiration AS expiration,
+				sig.state AS state,
+				sig.packet AS packet,
+				sig.sig_type AS sig_type,
+				signer.r_keyid AS signer,
+				signer.uuid AS signer_uuid,
+				signed.uuid AS uat_uuid`, uat.ScopedDigest)
 		if err != nil && err != sql.ErrNoRows {
 			return
 		}
@@ -367,8 +427,17 @@ SELECT * FROM openpgp_sig WHERE pubkey_uuid = $1 AND uat_uuid = $2
 	}
 	// Retrieve all subkey records
 	subkeys := []Subkey{}
-	err = w.db.Select(&subkeys,
-		`SELECT * FROM openpgp_subkey WHERE pubkey_uuid = $1`, uuid)
+	err = w.db.Select(&subkeys, `
+		MATCH (subkey:SubKey)-[:BELONGS_TO]->(key:PubKey { uuid:{0} })
+		RETURN
+			subkey.uuid AS uuid,
+			subkey.creation AS creation,
+			subkey.expiration AS expiration,
+			subkey.state AS state,
+			subkey.packet AS packet,
+			key.uuid AS pubkey_uuid,
+			subkey.algorithm AS algorithm,
+			subkey.bit_len AS bit_len`, uuid)
 	if err != nil && err != sql.ErrNoRows {
 		return
 	}
@@ -379,8 +448,17 @@ SELECT * FROM openpgp_sig WHERE pubkey_uuid = $1 AND uat_uuid = $2
 		}
 		sigs = []Signature{}
 		err = w.db.Select(&sigs, `
-SELECT * FROM openpgp_sig sig WHERE pubkey_uuid = $1 AND subkey_uuid = $2
-	AND uid_uuid IS NULL AND uat_uuid IS NULL AND sig_uuid IS NULL`, uuid, subkey.RFingerprint)
+			MATCH (signer:PubKey)-[sig:SIGNS]->(signed:SubKey { uuid:{0} })
+			RETURN
+				sig.uuid AS uuid,
+				sig.creation AS creation,
+				sig.expiration AS expiration,
+				sig.state AS state,
+				sig.packet AS packet,
+				sig.sig_type AS sig_type,
+				signer.r_keyid AS signer,
+				signer.uuid AS signer_uuid,
+				signed.uuid AS subkey_uuid`, subkey.RFingerprint)
 		if err != nil && err != sql.ErrNoRows {
 			return
 		}

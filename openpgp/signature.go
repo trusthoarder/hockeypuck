@@ -30,15 +30,16 @@ import (
 
 	"code.google.com/p/go.crypto/openpgp/packet"
 
+	"github.com/cmars/hockeypuck/types"
 	"github.com/cmars/hockeypuck/util"
 )
 
 type Signature struct {
 	ScopedDigest       string         `db:"uuid"`        // immutable
-	Creation           time.Time      `db:"creation"`    // immutable
-	Expiration         time.Time      `db:"expiration"`  // immutable
+	Creation           types.WrappedTime  `db:"creation"`    // immutable
+	Expiration         types.WrappedTime  `db:"expiration"`  // immutable
 	State              int            `db:"state"`       // mutable
-	Packet             []byte         `db:"packet"`      // immutable
+	Packet             types.WrappedByteArray  `db:"packet"`      // immutable
 	SigType            int            `db:"sig_type"`    // immutable
 	RIssuerKeyId       string         `db:"signer"`      // immutable
 	RIssuerFingerprint sql.NullString `db:"signer_uuid"` // mutable
@@ -88,19 +89,19 @@ func (sig *Signature) calcScopedDigest(pubkey *Pubkey, scope string) string {
 	h.Write([]byte("{sig}"))
 	h.Write([]byte(scope))
 	h.Write([]byte("{sig}"))
-	h.Write(sig.Packet)
+	h.Write(sig.Packet.Bytes)
 	return toAscii85String(h.Sum(nil))
 }
 
 func (sig *Signature) Serialize(w io.Writer) error {
-	_, err := w.Write(sig.Packet)
+	_, err := w.Write(sig.Packet.Bytes)
 	return err
 }
 
 func (sig *Signature) Uuid() string { return sig.ScopedDigest }
 
 func (sig *Signature) GetOpaquePacket() (*packet.OpaquePacket, error) {
-	return toOpaquePacket(sig.Packet)
+	return toOpaquePacket(sig.Packet.Bytes)
 }
 
 func (sig *Signature) GetPacket() (p packet.Packet, err error) {
@@ -127,7 +128,7 @@ func (sig *Signature) setPacket(p packet.Packet) (err error) {
 }
 
 func (sig *Signature) Read() (err error) {
-	buf := bytes.NewBuffer(sig.Packet)
+	buf := bytes.NewBuffer(sig.Packet.Bytes)
 	var p packet.Packet
 	if p, err = packet.Read(buf); err != nil {
 		return
@@ -136,7 +137,7 @@ func (sig *Signature) Read() (err error) {
 }
 
 func (sig *Signature) GetSignature() (packet.Packet, error) {
-	buf := bytes.NewBuffer(sig.Packet)
+	buf := bytes.NewBuffer(sig.Packet.Bytes)
 	return packet.Read(buf)
 }
 
@@ -145,7 +146,7 @@ func NewSignature(op *packet.OpaquePacket) (sig *Signature, err error) {
 	if err = op.Serialize(&buf); err != nil {
 		return
 	}
-	sig = &Signature{Packet: buf.Bytes()}
+	sig = &Signature{Packet: types.WrappedByteArray{Bytes: buf.Bytes()}}
 	var p packet.Packet
 	if p, err = op.Parse(); err != nil {
 		return
@@ -164,9 +165,9 @@ func NewSignature(op *packet.OpaquePacket) (sig *Signature, err error) {
 }
 
 func (sig *Signature) initV3() (err error) {
-	sig.Creation = sig.SignatureV3.CreationTime
+	sig.Creation.Time = sig.SignatureV3.CreationTime
 	// V3 packets do not have an expiration time
-	sig.Expiration = NeverExpires
+	sig.Expiration.Time = NeverExpires
 	sig.SigType = int(sig.SignatureV3.SigType)
 	// Extract the issuer key id
 	var issuerKeyId [8]byte
@@ -180,8 +181,8 @@ func (sig *Signature) initV4() (err error) {
 	if sig.Signature.IssuerKeyId == nil {
 		return errors.New("Signature missing issuer key ID")
 	}
-	sig.Creation = sig.Signature.CreationTime
-	sig.Expiration = NeverExpires
+	sig.Creation.Time = sig.Signature.CreationTime
+	sig.Expiration.Time = NeverExpires
 	sig.SigType = int(sig.Signature.SigType)
 	// Extract the issuer key id
 	var issuerKeyId [8]byte
@@ -192,7 +193,7 @@ func (sig *Signature) initV4() (err error) {
 	}
 	// Expiration time
 	if sig.Signature.SigLifetimeSecs != nil {
-		sig.Expiration = sig.Signature.CreationTime.Add(
+		sig.Expiration.Time = sig.Signature.CreationTime.Add(
 			time.Duration(*sig.Signature.SigLifetimeSecs) * time.Second)
 	}
 	return

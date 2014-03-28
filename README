@@ -1,7 +1,17 @@
 Hockeypuck: OpenPGP Key Server
 ==============================
 
-Documentation: http://hockeypuck.github.io
+This is a fork of the regular Hockeypuck PGP server, focused on 
+replacing the backend with the Neo4j graph database. It is in
+very early stages. Also, we'll change the name as soon as we 
+come up with a better one.
+
+Running hockeypuck with Neo4j
+-----------------------------
+
+hockeypuck run --config hkp_neo.conf
+
+Documentation for regular hockeypuck: http://hockeypuck.github.io
 
 Installation
 ------------
@@ -24,7 +34,7 @@ to get this running:
 
 2. Install the dependencies:
 
-    go get code.google.com/p/go.crypto/md4 code.google.com/p/go.crypto/openpgp code.google.com/p/go.crypto/openpgp/armor code.google.com/p/go.crypto/openpgp/errors code.google.com/p/go.crypto/openpgp/packet code.google.com/p/go.crypto/ripemd160 github.com/cmars/conflux github.com/cmars/conflux/recon github.com/cmars/conflux/recon/leveldb github.com/jmoiron/sqlx github.com/juju/errgo/errors github.com/lib/pq github.com/syndtr/goleveldb/leveldb github.com/syndtr/goleveldb/leveldb/storage launchpad.net/gnuflag
+    go get code.google.com/p/go.crypto/md4 code.google.com/p/go.crypto/openpgp code.google.com/p/go.crypto/openpgp/armor code.google.com/p/go.crypto/openpgp/errors code.google.com/p/go.crypto/openpgp/packet code.google.com/p/go.crypto/ripemd160 github.com/cmars/conflux github.com/cmars/conflux/recon github.com/cmars/conflux/recon/leveldb github.com/jmoiron/sqlx github.com/juju/errgo/errors github.com/lib/pq github.com/syndtr/goleveldb/leveldb github.com/syndtr/goleveldb/leveldb/storage launchpad.net/gnuflag github.com/wfreeman/cq
 
 3. Build the app:
 
