@@ -244,11 +244,15 @@ func flattenUuidRows(rows *sqlx.Rows) (uuids []string, err error) {
 
 func (w *Worker) lookupKeywordUuids(search string, limit int) (uuids []string, err error) {
 	search = strings.Join(strings.Split(search, " "), "+")
+	regexp := fmt.Sprintf(".*%s.*", search)
 	log.Println("keyword:", search)
+	log.Println("regexp:", regexp)
 	log.Println("limit:", limit)
 	rows, err := w.db.Queryx(`
-SELECT DISTINCT pubkey_uuid FROM openpgp_uid
-WHERE keywords_fulltext @@ to_tsquery($1) LIMIT $2`, search, limit)
+		MATCH (uid:UID)-[:IDENTIFIES]->(key:PubKey)
+		WHERE uid.keywords =~ {0}
+		RETURN DISTINCT key.uuid AS uuid
+		LIMIT {1}`, regexp, limit)
 	if err == sql.ErrNoRows {
 		return nil, ErrKeyNotFound
 	} else if err != nil {
