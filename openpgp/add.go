@@ -250,35 +250,26 @@ func (w *Worker) UpsertKey(key *Pubkey) (change *KeyChange) {
 
 // UpdateKey updates the database to the contents of the given public key.
 func (w *Worker) UpdateKey(pubkey *Pubkey) (err error) {
-	if err = w.InsertKey(pubkey); err != nil {
-		return errors.Mask(err)
-	}
 	var signable PacketRecord
 	err = pubkey.Visit(func(rec PacketRecord) (err error) {
 		switch r := rec.(type) {
 		case *Pubkey:
 			_, err := w.db.Execv(`
 				MATCH (key:PubKey { uuid:{0} })
-				SET key = {
-					uuid:{0},
-					creation:{1},
-					expiration:{2},
-					state:{3},
-					packet:{4},
-					ctime:{5},
-					mtime:{6},
-					md5:{7},
-					sha256:{8},
-					algorithm:{9},
-					bit_len:{10},
-					unsupp:{11},
-					r_keyid:{12}
-				}`, r.RFingerprint,
-				r.Creation, r.Expiration, r.State, r.Packet,
-				r.Ctime, r.Mtime, r.Md5, r.Sha256,
-				r.Algorithm, r.BitLen, r.Unsupported, r.RKeyId())
-				// When sending a key with the primary UID changed ...
-				//FIXME: This doesn't update the PRIMARILY_IDENTIFIED_BY relationships
+				SET key.creation = {1}
+				SET key.expiration = {2}
+				SET key.state = {3}
+				SET key.packet = {4}
+				SET key.ctime = {5}
+				SET key.mtime = {6}
+				SET key.md5 = {7}
+				SET key.sha256 = {8}
+				SET key.algorithm = {9}
+				SET key.bit_len = {10}
+				SET key.unsupp = {11}`,
+				r.RFingerprint, r.Creation, r.Expiration, r.State, r.Packet,
+				r.Ctime, r.Mtime, r.Md5, r.Sha256, r.Algorithm, r.BitLen,
+				r.Unsupported)
 			if err != nil {
 				return errors.Mask(err)
 			}
@@ -301,39 +292,44 @@ func (w *Worker) UpdateKey(pubkey *Pubkey) (err error) {
 			signable = r
 		case *UserId:
 			_, err := w.tx.Execv(`
-UPDATE openpgp_uid SET
-	creation = $2, expiration = $3, state = $4, packet = $5,
-	pubkey_uuid = $6, revsig_uuid = $7, keywords = $8
-WHERE uuid = $1`,
-				r.ScopedDigest,
-				r.Creation, r.Expiration, r.State, r.Packet,
-				r.PubkeyRFP, r.RevSigDigest, r.Keywords)
+					MATCH (uid:UID { uuid:{0} })
+					SET uid.creation = {1}
+					SET uid.expiration = {2}
+					SET uid.state = {3}
+					SET uid.packet = {4}
+					SET uid.keywords = {5}`,
+				r.ScopedDigest, r.Creation, r.Expiration, r.State, r.Packet,
+				r.Keywords)
+				// FIXME: RevSigDigest
 			if err != nil {
 				return errors.Mask(err)
 			}
 			signable = r
 		case *UserAttribute:
 			_, err := w.tx.Execv(`
-UPDATE openpgp_uat SET
-	creation = $2, expiration = $3, state = $4, packet = $5,
-	pubkey_uuid = $6, revsig_uuid = $7
-WHERE uuid = $1`,
+					MATCH (uat:UAT { uuid:{0} })
+					SET uat.creation = {1}
+					SET uat.expiration = {2}
+					SET uat.state = {3}
+					SET uat.packet = {4}`,
 				r.ScopedDigest,
-				r.Creation, r.Expiration, r.State, r.Packet,
-				r.PubkeyRFP, r.RevSigDigest)
+				r.Creation, r.Expiration, r.State, r.Packet)
+				// FIXME: RevSigDigest
 			if err != nil {
 				return errors.Mask(err)
 			}
 			signable = r
 		case *Signature:
 			_, err := w.tx.Execv(`
-UPDATE openpgp_sig SET
-	creation = $2, expiration = $3, state = $4, packet = $5,
-	sig_type = $6, signer = $7, signer_uuid = $8, revsig_uuid = $9
-WHERE uuid = $1`,
-				r.ScopedDigest,
-				r.Creation, r.Expiration, r.State, r.Packet,
-				r.SigType, r.RIssuerKeyId, r.RIssuerFingerprint, r.RevSigDigest)
+					MATCH (signer)-[sig:SIGNS { uuid:{0} }]->(signed)
+					SET sig.creation = {1}
+					SET sig.expiration = {2}
+					SET sig.state = {3}
+					SET sig.packet = {4}
+					SET sig.sig_type = {5}
+					SET sig.signer = {6}`,
+				r.ScopedDigest, r.Creation, r.Expiration, r.State, r.Packet,
+				r.SigType, r.RIssuerKeyId)
 			if err != nil {
 				return errors.Mask(err)
 			}
@@ -442,15 +438,20 @@ UPDATE openpgp_uat SET revsig_uuid = $1 WHERE uuid = $2`,
 
 func (w *Worker) updatePrimaryUid(pubkey *Pubkey, r *UserId) error {
 	if pubkey.PrimaryUid.String == r.ScopedDigest {
-		if _, err := w.tx.Execv(`
-          MATCH (pubkey:PubKey { uuid:{1} }),
-                (uid:UID { uuid:{0} })
-          OPTIONAL MATCH (pubkey)-[rel:PRIMARILY_IDENTIFIED_BY]->(q:UID)
-          DELETE rel
-          CREATE (pubkey)-[:PRIMARILY_IDENTIFIED_BY]->(uid)`,
-			r.ScopedDigest, pubkey.RFingerprint); err != nil {
-			return errors.Mask(err)
-		}
+	  w.updatePrimaryUidFor(pubkey)
+	}
+	return nil
+}
+
+func (w *Worker) updatePrimaryUidFor(pubkey *Pubkey) error {
+	if _, err := w.tx.Execv(`
+	  MATCH (pubkey:PubKey { uuid:{1} }),
+			(uid:UID { uuid:{0} })
+	  OPTIONAL MATCH (pubkey)-[rel:PRIMARILY_IDENTIFIED_BY]->(q:UID)
+	  DELETE rel
+	  CREATE (pubkey)-[:PRIMARILY_IDENTIFIED_BY]->(uid)`,
+		pubkey.PrimaryUid.String, pubkey.RFingerprint); err != nil {
+		return errors.Mask(err)
 	}
 	return nil
 }
