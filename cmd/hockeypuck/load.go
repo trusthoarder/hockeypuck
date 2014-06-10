@@ -27,7 +27,6 @@ import (
 
 	"github.com/cmars/conflux"
 	"github.com/cmars/conflux/recon"
-	"github.com/lib/pq"
 	"launchpad.net/gnuflag"
 
 	. "github.com/cmars/hockeypuck"
@@ -73,24 +72,24 @@ func (ec *loadCmd) Main() {
 	InitLog()
 	var err error
 	if ec.db, err = openpgp.NewDB(); err != nil {
-		die(err)
+		panic(err)
 	}
 	ec.l = openpgp.NewLoader(ec.db, true)
 	// Ensure tables all exist
 	if err = ec.db.CreateTables(); err != nil {
-		die(err)
+		panic(err)
 	}
 	reconSettings := recon.NewSettings(openpgp.Config().Settings.TomlTree)
 	if ec.ptree, err = openpgp.NewSksPTree(reconSettings); err != nil {
-		die(err)
+		panic(err)
 	}
 	// Create the prefix tree (if not exists)
 	if err = ec.ptree.Create(); err != nil {
-		die(fmt.Errorf("Unable to create prefix tree: %v", err))
+		panic(fmt.Errorf("Unable to create prefix tree: %v", err))
 	}
 	// Ensure tables all exist
 	if err = ec.db.CreateTables(); err != nil {
-		die(fmt.Errorf("Unable to create database tables: %v", err))
+		panic(fmt.Errorf("Unable to create database tables: %v", err))
 	}
 	// Load all keys from input material
 	ec.loadAllKeys(ec.path)
@@ -108,7 +107,7 @@ func (ec *loadCmd) flushDb() {
 	if ec.inTransaction {
 		log.Println("Loaded", ec.nkeys, "keys")
 		if err := ec.l.Commit(); err != nil {
-			die(fmt.Errorf("Error committing transaction: %v", err))
+			panic(fmt.Errorf("Error committing transaction: %v", err))
 		}
 		ec.inTransaction = false
 		ec.nkeys = 0
@@ -120,16 +119,13 @@ func (ec *loadCmd) insertKey(keyRead *openpgp.ReadKeyResult) error {
 	if ec.nkeys%ec.txnSize == 0 {
 		ec.flushDb()
 		if _, err = ec.l.Begin(); err != nil {
-			die(fmt.Errorf("Error starting new transaction: %v", err))
+			panic(fmt.Errorf("Error starting new transaction: %v", err))
 		}
 		ec.inTransaction = true
 	}
 	// Load key into relational database
 	if err = ec.l.InsertKey(keyRead.Pubkey); err != nil {
-		log.Println("Error inserting key:", keyRead.Pubkey.Fingerprint(), ":", err)
-		if _, is := err.(pq.Error); is {
-			die(fmt.Errorf("Unable to load due to database errors."))
-		}
+		panic(fmt.Errorf("Error inserting key: %v: %v", keyRead.Pubkey.Fingerprint(), ":", err))
 	}
 	ec.nkeys++
 	return err
@@ -138,7 +134,7 @@ func (ec *loadCmd) insertKey(keyRead *openpgp.ReadKeyResult) error {
 func (ec *loadCmd) loadAllKeys(path string) {
 	keyfiles, err := filepath.Glob(path)
 	if err != nil {
-		die(err)
+		panic(err)
 	}
 	for _, keyfile := range keyfiles {
 		var f *os.File

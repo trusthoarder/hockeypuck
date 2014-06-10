@@ -30,14 +30,6 @@ import (
 	"launchpad.net/gnuflag"
 )
 
-func die(err error) {
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
-		os.Exit(1)
-	}
-	os.Exit(0)
-}
-
 type cmdHandler interface {
 	Name() string
 	Desc() string
@@ -156,7 +148,7 @@ type configuredCmd struct {
 func (c configuredCmd) Main() {
 	if c.configPath != "" {
 		if err := LoadConfigFile(c.configPath); err != nil {
-			die(err)
+			panic(err)
 		}
 	} else {
 		// Fall back on default empty config

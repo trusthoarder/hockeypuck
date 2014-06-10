@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"os"
 
 	"code.google.com/p/gorilla/mux"
 	"launchpad.net/gnuflag"
@@ -39,13 +40,13 @@ func (c *runCmd) Main() {
 	// Create SKS peer
 	sksPeer, err := openpgp.NewSksPeer(hkpRouter.Service)
 	if err != nil {
-		die(err)
+		panic(err)
 	}
 	// Launch the OpenPGP workers
 	for i := 0; i < openpgp.Config().NumWorkers(); i++ {
 		w, err := openpgp.NewWorker(hkpRouter.Service, sksPeer)
 		if err != nil {
-			die(err)
+			panic(err)
 		}
 		// Subscribe SKS to worker's key changes
 		w.SubKeyChanges(sksPeer.KeyChanges)
@@ -56,5 +57,8 @@ func (c *runCmd) Main() {
 	http.Handle("/", r)
 	// Start the built-in webserver, run forever
 	err = http.ListenAndServe(hkp.Config().HttpBind(), nil)
-	die(err)
+	if err != nil {
+		panic(err)
+	}
+	os.Exit(0)
 }

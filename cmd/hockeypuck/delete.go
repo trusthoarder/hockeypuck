@@ -65,23 +65,23 @@ func (ec *deleteCmd) Main() {
 	ec.configuredCmd.Main()
 	InitLog()
 	if ec.db, err = openpgp.NewDB(); err != nil {
-		die(err)
+		panic(err)
 	}
 	// Ensure tables all exist
 	if err = ec.db.CreateTables(); err != nil {
-		die(err)
+		panic(err)
 	}
 	reconSettings := recon.NewSettings(openpgp.Config().Settings.TomlTree)
 	if ec.ptree, err = openpgp.NewSksPTree(reconSettings); err != nil {
-		die(err)
+		panic(err)
 	}
 	// Create the prefix tree (if not exists)
 	if err = ec.ptree.Create(); err != nil {
-		die(err)
+		panic(err)
 	}
 	// Ensure tables all exist
 	if err = ec.db.CreateTables(); err != nil {
-		die(err)
+		panic(err)
 	}
 	defer ec.db.Close()
 	defer ec.ptree.Close()
@@ -118,7 +118,7 @@ func (ec *deleteCmd) deleteKeyHash() {
 	ec.keyHash = strings.ToLower(ec.keyHash)
 	keyHashBuf, err := hex.DecodeString(ec.keyHash)
 	if err != nil {
-		die(err)
+		panic(err)
 	}
 	if err = ec.ptree.Remove(conflux.Zb(conflux.P_SKS, keyHashBuf)); err != nil {
 		log.Println("Remove [%s] from prefix tree: %v", ec.keyHash, err)
@@ -127,14 +127,14 @@ func (ec *deleteCmd) deleteKeyHash() {
 	row, err := ec.db.Query(
 		"SELECT uuid FROM openpgp_pubkey WHERE md5 = $1", ec.keyHash)
 	if err != nil {
-		die(err)
+		panic(err)
 	}
 	if !row.Next() {
-		die(fmt.Errorf("Key hash [%d] not found", ec.keyHash))
+		panic(fmt.Errorf("Key hash [%d] not found", ec.keyHash))
 	}
 	err = row.Scan(&uuid)
 	if err != nil {
-		die(err)
+		panic(err)
 	}
 	ec.deletePubkey(uuid)
 	log.Println(ec.keyHash, "deleted from prefix tree and database")
@@ -145,19 +145,19 @@ func (ec *deleteCmd) deleteFingerprint() {
 	row, err := ec.db.Query(
 		"SELECT md5 FROM openpgp_pubkey WHERE uuid = $1", uuid)
 	if err != nil {
-		die(err)
+		panic(err)
 	}
 	if !row.Next() {
-		die(fmt.Errorf("Key fingerprint [%s] not found", uuid))
+		panic(fmt.Errorf("Key fingerprint [%s] not found", uuid))
 	}
 	var keyHash string
 	err = row.Scan(&keyHash)
 	if err != nil {
-		die(err)
+		panic(err)
 	}
 	keyHashBuf, err := hex.DecodeString(keyHash)
 	if err != nil {
-		die(err)
+		panic(err)
 	}
 	if err = ec.ptree.Remove(conflux.Zb(conflux.P_SKS, keyHashBuf)); err != nil {
 		log.Println("Remove [%s] from prefix tree: %v", keyHash, err)

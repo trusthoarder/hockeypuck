@@ -51,12 +51,12 @@ func (ec *recoverCmd) Main() {
 	path := openpgp.Config().Settings.TomlTree.Get("conflux.recon.leveldb.path").(string)
 	stor, err := storage.OpenFile(path)
 	if err != nil {
-		die(err)
+		panic(err)
 	}
 	log.Println("database storage opened, recovering...")
 	db, err := leveldb.Recover(stor, nil)
 	if err != nil {
-		die(err)
+		panic(err)
 	}
 	log.Println("recovery complete")
 	db.Close()

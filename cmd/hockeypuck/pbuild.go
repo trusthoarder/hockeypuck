@@ -63,13 +63,13 @@ func (c *pbuildCmd) Main() {
 	var db *openpgp.DB
 	var err error
 	if db, err = openpgp.NewDB(); err != nil {
-		die(err)
+		panic(err)
 	}
 	var ptree recon.PrefixTree
 	reconSettings := recon.NewSettings(openpgp.Config().Settings.TomlTree)
 	reconSettings.Set("conflux.recon.diskv.cacheSizeMax", 1024*1024*c.cache)
 	if ptree, err = openpgp.NewSksPTree(reconSettings); err != nil {
-		die(err)
+		panic(err)
 	}
 	if err = ptree.Create(); err != nil {
 		panic(err)
@@ -100,12 +100,12 @@ func readHashes(db *openpgp.DB) chan *conflux.Zp {
 		defer close(hashes)
 		rows, err := db.DB.Query("SELECT md5 FROM openpgp_pubkey")
 		if err != nil {
-			die(err)
+			panic(err)
 		}
 		for rows.Next() {
 			var md5str string
 			if err = rows.Scan(&md5str); err != nil {
-				die(err)
+				panic(err)
 			}
 			digest, err := hex.DecodeString(md5str)
 			if err != nil {

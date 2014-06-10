@@ -59,31 +59,31 @@ func (c *dbCmd) Main() {
 	var db *openpgp.DB
 	var err error
 	if db, err = openpgp.NewDB(); err != nil {
-		die(err)
+		panic(err)
 	}
 	// Ensure tables all exist
 	if c.crTables {
 		if err = db.CreateTables(); err != nil {
-			die(err)
+			panic(err)
 		}
 	}
 	// Drop constraints
 	if c.drConstraints {
 		// Create all constraints
 		if err = db.DropConstraints(); err != nil {
-			die(err)
+			panic(err)
 		}
 	}
 	// De-duplication option
 	if c.dedup {
 		if err = db.DeleteDuplicates(); err != nil {
-			die(err)
+			panic(err)
 		}
 	}
 	// Create all constraints
 	if c.crConstraints {
 		if err = db.CreateConstraints(); err != nil {
-			die(err)
+			panic(err)
 		}
 	}
 }
