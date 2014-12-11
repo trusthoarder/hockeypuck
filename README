@@ -42,16 +42,9 @@ to get this running:
     go build github.com/cmars/hockeypuck/cmd/hockeypuck
     cd ..
 
-4. Make the database
+4. Run the app
 
-    createdb hkp
-
-5. Make a configuration file for your database:
-
-    cat > hockeypuck.conf
-    [hockeypuck.openpgp.db]
-    dsn="dbname=hkp host=localhost sslmode=disable user=mike"
-    ^D
+    hockeypuck run --config hkp_neo.conf
 
 Running
 -------
